@@ -4,6 +4,8 @@ from __future__ import unicode_literals
 import json
 import datetime
 
+import websocket
+
 from .common import InfoExtractor
 from ..compat import (
     compat_parse_qs,
@@ -467,4 +469,85 @@ class NiconicoPlaylistIE(InfoExtractor):
             'title': self._search_regex(r'\s+name: "(.*?)"', webpage, 'title'),
             'id': list_id,
             'entries': entries,
+        }
+
+
+class NiconicoLiveIE(InfoExtractor):
+    IE_NAME = 'niconicolive'
+    IE_DESC = 'ニコニコ生放送'
+
+    _VALID_URL = r'https?://live2?\.nicovideo\.jp/watch/(?P<id>lv\d+)'
+    _TEST = {
+        'url': 'https://live2.nicovideo.jp/watch/lv327073937',
+        'info_dict': {
+            'id': 'lv327073937',
+            'ext': 'mp4',
+            'title': '四葉描く',
+            'description': '<br /> 【ツイッター】twitter.com/mikoten3510\n <br /> 【ピクシブ】<a href=\"http://pixiv.me/35103103\" target=\"_blank\">http://pixiv.me/35103103</a>',
+            'uploader': 'ミコテン',
+        }
+    }
+
+    def _get_m3u8_url(self, websocket_url, quality, video_id):
+        request_frame = {
+            "type": "startWatching",
+            "data": {
+                "stream": {
+                    "quality": quality,
+                    "protocol": "hls",
+                    "latency": "high",
+                    "chasePlay": False
+                },
+                "room": {
+                    "protocol": "webSocket",
+                    "commentable": True
+                },
+                "reconnect": False
+            }
+        }
+        ws = websocket.create_connection(websocket_url)
+        ws.send(json.dumps(request_frame))
+
+        m3u8_url = None
+        # Read all messages until stream info is received
+        while m3u8_url is None:
+            message = self._parse_json(ws.recv(), video_id)
+            message_type = message.get('type')
+
+            if message_type == 'ping':
+                ws.send('{"type":"pong"}')
+                continue
+
+            if message_type == 'stream':
+                m3u8_url = message['data']['uri']
+
+        ws.close()
+        return m3u8_url
+
+    def _real_extract(self, url):
+        video_id = self._match_id(url)
+        webpage = self._download_webpage(url, video_id)
+
+        embedded_data_raw = self._html_search_regex(
+            r'id\s*=\s*"embedded-data"[^>]*data-props\s*=\s*"([^"]+)"',
+            webpage, 'embedded-data')
+
+        embedded_data = self._parse_json(embedded_data_raw, video_id)
+
+        program_meta = embedded_data['program']
+        title = program_meta['title']
+
+        websocket_url = embedded_data['site']['relive']['webSocketUrl']
+        best_quality = program_meta['stream']['maxQuality']
+
+        m3u8_url = self._get_m3u8_url(websocket_url, best_quality, video_id)
+        formats = self._extract_m3u8_formats(
+            m3u8_url, video_id, ext='mp4', m3u8_id='hls')
+
+        return {
+            'id': video_id,
+            'title': title,
+            'description': program_meta.get('description'),
+            'uploader': program_meta.get('supplier', {}).get('name'),
+            'formats': formats,
         }

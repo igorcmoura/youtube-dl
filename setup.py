@@ -115,6 +115,10 @@ setup(
         'youtube_dl.extractor', 'youtube_dl.downloader',
         'youtube_dl.postprocessor'],
 
+    install_requires=[
+        'websocket-client==0.57.0'
+    ]
+
     # Provokes warning on most systems (why?!)
     # test_suite = 'nose.collector',
     # test_requires = ['nosetest'],
