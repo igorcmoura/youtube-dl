@@ -489,6 +489,7 @@ class NiconicoLiveIE(InfoExtractor):
     }
 
     def _get_m3u8_url(self, websocket_url, quality, video_id):
+        """Sends a request for the m3u8 url via websocket."""
         request_frame = {
             "type": "startWatching",
             "data": {
@@ -509,7 +510,7 @@ class NiconicoLiveIE(InfoExtractor):
         ws.send(json.dumps(request_frame))
 
         m3u8_url = None
-        # Read all messages until stream info is received
+        # Read all messages until the stream data is received
         while m3u8_url is None:
             message = self._parse_json(ws.recv(), video_id)
             message_type = message.get('type')
@@ -535,7 +536,26 @@ class NiconicoLiveIE(InfoExtractor):
         embedded_data = self._parse_json(embedded_data_raw, video_id)
 
         program_meta = embedded_data['program']
-        title = program_meta['title']
+        title = try_get(program_meta, lambda x: x['title'], str) \
+            or self._og_search_title(webpage, default=None) \
+            or self._html_search_regex(
+                r'<p[^>]+class=["\']___title___[^"\']*["\'][^>]*>\s*<span>([^<]+)',
+                webpage, 'title')
+
+        uploader_data = try_get(program_meta, lambda x: x['supplier'], dict) or {}
+        statistics = program_meta.get('statistics', {})
+        thumbnails = [
+            {'id': img_size, 'url': img_url}
+            for img_size, img_url
+            in (try_get(program_meta, lambda x: x['thumbnail'], dict) or {}).items()
+        ]
+        tags = [
+            tag['text']
+            for tag
+            in try_get(program_meta, lambda x: x['tag']['list'], list)
+            if try_get(tag, lambda x: x['text']) is not None
+        ]
+        start_time = parse_duration(url.partition('#')[2])
 
         websocket_url = embedded_data['site']['relive']['webSocketUrl']
         best_quality = program_meta['stream']['maxQuality']
@@ -548,6 +568,15 @@ class NiconicoLiveIE(InfoExtractor):
             'id': video_id,
             'title': title,
             'description': program_meta.get('description'),
-            'uploader': program_meta.get('supplier', {}).get('name'),
+            'thumbnails': thumbnails,
+            'timestamp': program_meta.get('openTime'),
+            'uploader': uploader_data.get('name'),
+            'uploader_id': uploader_data.get('programProviderId'),
+            'uploader_url': uploader_data.get('pageUrl'),
+            'view_count': statistics.get('watchCount'),
+            'comment_count': statistics.get('commentCount'),
+            'tags': tags,
+            'is_live': try_get(program_meta, lambda x: x['status'] == 'ON_AIR'),
+            'start_time': start_time,
             'formats': formats,
         }
