@@ -542,6 +542,10 @@ class InfoExtractor(object):
         except (KeyError, StopIteration) as e:
             raise ExtractorError('An extractor error has occurred.', cause=e)
 
+    def finalize(self, url):
+        """Finalizes an instance (close connections, etc)."""
+        self._real_finalize(url)
+
     def __maybe_fake_ip_and_retry(self, countries):
         if (not self._downloader.params.get('geo_bypass_country', None)
                 and self._GEO_BYPASS
@@ -567,6 +571,10 @@ class InfoExtractor(object):
 
     def _real_extract(self, url):
         """Real extraction process. Redefine in subclasses."""
+        pass
+
+    def _real_finalize(self, url):
+        """Real finalization process. Redefine in subclasses."""
         pass
 
     @classmethod

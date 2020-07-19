@@ -3,6 +3,8 @@ from __future__ import unicode_literals
 
 import json
 import datetime
+import time
+import threading
 
 import websocket
 
@@ -488,8 +490,35 @@ class NiconicoLiveIE(InfoExtractor):
         }
     }
 
+    def __init__(self, *args, **kwargs):
+        super(NiconicoLiveIE, self).__init__(*args, **kwargs)
+        self._keep_seat_thread = {}  # Threads, indexed by video id, sending the keepSeat message
+
+    class KeepSeatThread(threading.Thread):
+        """
+        Threads responsible for sending the keepSeat messages via
+        websocket to prevent the download from being blocked.
+        """
+        def __init__(self, ws, interval):
+            threading.Thread.__init__(self)
+            self._websocket = ws
+            self._interval = interval
+            self._must_stop = threading.Event()
+
+        def run(self):
+            while not self._must_stop.is_set():
+                self._websocket.send('{"type":"keepSeat"}')
+                self._must_stop.wait(self._interval)
+            self._websocket.close()
+
+        def stop(self):
+            self._must_stop.set()
+
     def _get_m3u8_url(self, websocket_url, quality, video_id):
-        """Sends a request for the m3u8 url via websocket."""
+        """
+        Opens a websocket connection to request the m3u8 url and
+        keeps it alive to prevent the download from being blocked.
+        """
         request_frame = {
             "type": "startWatching",
             "data": {
@@ -509,9 +538,12 @@ class NiconicoLiveIE(InfoExtractor):
         ws = websocket.create_connection(websocket_url)
         ws.send(json.dumps(request_frame))
 
+        # Niconico Live requires the user to keep sending
+        # a keepSeat message to avoid having the access
+        # to the m3u8 blocked.
         m3u8_url = None
-        # Read all messages until the stream data is received
-        while m3u8_url is None:
+        seat_initialized = False
+        while m3u8_url is None or not seat_initialized:
             message = self._parse_json(ws.recv(), video_id)
             message_type = message.get('type')
 
@@ -521,9 +553,25 @@ class NiconicoLiveIE(InfoExtractor):
 
             if message_type == 'stream':
                 m3u8_url = message['data']['uri']
+                continue
 
-        ws.close()
+            if message_type == 'seat':
+                if not seat_initialized:
+                    interval = message['data']['keepIntervalSec']
+                    self._initialize_seat(ws, video_id, interval)
+                    seat_initialized = True
+
         return m3u8_url
+
+    def _initialize_seat(self, ws, video_id, interval):
+        if video_id in self._keep_seat_thread:
+            thread = self._keep_seat_thread[video_id]
+            thread.stop()
+            thread.join()
+
+        thread = self.KeepSeatThread(ws, interval)
+        self._keep_seat_thread[video_id] = thread
+        thread.start()
 
     def _real_extract(self, url):
         video_id = self._match_id(url)
@@ -580,3 +628,10 @@ class NiconicoLiveIE(InfoExtractor):
             'start_time': start_time,
             'formats': formats,
         }
+
+    def _real_finalize(self, url):
+        video_id = self._match_id(url)
+        if video_id in self._keep_seat_thread:
+            thread = self._keep_seat_thread[video_id]
+            thread.stop()
+            thread.join()

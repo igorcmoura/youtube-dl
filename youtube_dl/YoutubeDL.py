@@ -827,6 +827,8 @@ class YoutubeDL(object):
                     break
                 else:
                     raise
+            finally:
+                ie.finalize(url)
         else:
             self.report_error('no suitable InfoExtractor for URL %s' % url)
 
