@@ -1,6 +1,5 @@
 # coding: utf-8
 from __future__ import unicode_literals
-from datetime import datetime
 
 from .common import InfoExtractor
 from ..utils import (
@@ -21,7 +20,6 @@ class TikTokBaseIE(InfoExtractor):
 
         unique_id = str_or_none(author_info.get('uniqueId'))
         timestamp = try_get(video_info, lambda x: int(x['createTime']), int)
-        date = datetime.fromtimestamp(timestamp).strftime('%Y%m%d')
 
         height = try_get(video_info, lambda x: x['video']['videoMeta']['height'], int)
         width = try_get(video_info, lambda x: x['video']['videoMeta']['width'], int)
@@ -56,7 +54,6 @@ class TikTokBaseIE(InfoExtractor):
             'uploader_id': str_or_none(author_info.get('userId')),
             'uploader_url': 'https://www.tiktok.com/@' + unique_id,
             'thumbnails': thumbnails,
-            'upload_date': date,
             'webpage_url': self._og_search_url(webpage),
             'description': str_or_none(video_info.get('text')) or str_or_none(share_info.get('desc')),
             'ext': 'mp4',
